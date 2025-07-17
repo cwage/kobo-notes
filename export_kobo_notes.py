@@ -193,7 +193,7 @@ def export_plain(highlights: List[Dict[str, Any]]) -> str:
             output += f"Progress: {h['progress']}\n\n"
         
         # Add the highlight
-        output += f'"{h["text"]}"\n\n'
+        output += f'"{h["text"] or ""}"\n\n'
         
         # Add context if available
         if h["context"]:
