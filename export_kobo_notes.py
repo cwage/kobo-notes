@@ -103,8 +103,10 @@ def get_highlights(db_path: str) -> List[Dict[str, Any]]:
             # Clean up the volume ID to extract book title if content table didn't have it
             if not title:
                 try:
-                    title = Path(volume_id).stem.split(' - ')[0].replace('_', ' ')
-                    attribution = Path(volume_id).stem.split(' - ')[1].replace('.kepub', '').replace('_', ' ')
+                    stem = Path(volume_id).stem
+                    parts = stem.split(' - ')
+                    title = parts[0].replace('_', ' ') if len(parts) > 0 else volume_id
+                    attribution = parts[1].replace('.kepub', '').replace('_', ' ') if len(parts) > 1 else "Unknown Author"
                 except (IndexError, AttributeError):
                     title = volume_id
                     attribution = "Unknown Author"
