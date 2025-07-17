@@ -155,7 +155,7 @@ def export_markdown(highlights: List[Dict[str, Any]]) -> str:
         
         # Add the highlight - ensure each line starts with >
         quote_lines = (h['text'] or "").splitlines()
-        formatted_quote = '\n'.join(f"> {line.strip()}" if line.strip() else ">" for line in quote_lines)
+        formatted_quote = '\n'.join(f"> {stripped_line}" if (stripped_line := line.strip()) else ">" for line in quote_lines)
         output += f"{formatted_quote}\n\n"
         
         # Add context if available
