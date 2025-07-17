@@ -152,7 +152,7 @@ def export_markdown(highlights: List[Dict[str, Any]]) -> str:
             output += f"*Progress: {h['progress']}*\n\n"
         
         # Add the highlight - ensure each line starts with >
-        quote_lines = h['text'].splitlines()
+        quote_lines = (h['text'] or "").splitlines()
         formatted_quote = '\n'.join(f"> {line.strip()}" if line.strip() else ">" for line in quote_lines)
         output += f"{formatted_quote}\n\n"
         
