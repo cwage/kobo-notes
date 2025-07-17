@@ -1,108 +1,143 @@
 #!/usr/bin/env python3
+"""
+Kobo Notes Exporter
+
+This script exports highlights and annotations from a Kobo eReader's SQLite database.
+It supports multiple output formats including plain text, markdown, and JSON.
+
+The script extracts:
+- Highlighted text and annotations
+- Book metadata (title, author)
+- Chapter information and reading progress
+- Highlight colors and types
+- Creation dates and context
+
+Usage:
+    python export_kobo_notes.py -d /path/to/KoboReader.sqlite [-f format] [-o output_file]
+"""
 
 import argparse
 import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Union
+
+def parse_date(date_str: Optional[str]) -> Optional[str]:
+    """
+    Parse date string from Kobo database into a consistent format.
+    
+    Args:
+        date_str: Date string from Kobo database
+        
+    Returns:
+        Formatted date string in 'YYYY-MM-DD HH:MM:SS' format,
+        original string if parsing fails, or None if input is None
+    """
+    date_formats = [
+        "%Y-%m-%dT%H:%M:%S.%f",  # Standard Kobo format
+        "%Y-%m-%dT%H:%M:%S",     # Without microseconds
+        "%Y-%m-%d %H:%M:%S",     # Alternative format
+        "%Y-%m-%d"               # Just date
+    ]
+    
+    if not date_str:
+        return None
+        
+    for fmt in date_formats:
+        try:
+            date_obj = datetime.strptime(date_str, fmt)
+            return date_obj.strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    
+    return date_str  # Return original if no format matches
 
 def get_highlights(db_path: str) -> List[Dict[str, Any]]:
-    """Extract highlights from the Kobo SQLite database."""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    query = """
-    SELECT 
-        b.Text,
-        b.Annotation,
-        b.DateCreated,
-        b.VolumeID,
-        c.Title,
-        c.Attribution,
-        b.ChapterProgress,
-        b.StartContainerPath,
-        b.Type,
-        b.Color,
-        b.ContextString,
-        c.BookTitle,
-        c.CurrentChapterProgress
-    FROM Bookmark b
-    LEFT JOIN content c ON b.VolumeID = c.ContentID
-    WHERE b.Text IS NOT NULL OR b.Annotation IS NOT NULL
-    ORDER BY b.DateCreated
     """
+    Extract highlights from the Kobo SQLite database.
     
-    cursor.execute(query)
-    results = cursor.fetchall()
-    
-    # Get color mapping from database if it exists
-    try:
-        cursor.execute("SELECT ColorValue, DisplayName FROM Color")
-        color_map = dict(cursor.fetchall())
-    except sqlite3.Error:
-        color_map = {
-            0: "none",
-            1: "green",
-            2: "blue",
-            3: "red",
-            4: "yellow"
-        }
-    
+    Args:
+        db_path: Path to the KoboReader.sqlite database file
+        
+    Returns:
+        List of dictionaries containing highlight data with keys:
+        - text: The highlighted text
+        - annotation: User's annotation (if any)
+        - date: Creation date
+        - book_title: Title of the book
+        - author: Book's author
+        - progress: Reading progress as percentage
+        - type: Type of highlight
+        - context: Surrounding text context
+    """
     highlights = []
-    for row in results:
-        (text, annotation, date_created, volume_id, title, attribution, 
-         chapter_progress, container_path, highlight_type, color, context_string,
-         book_title, chapter_title) = row
-        
-        # Clean up the volume ID to extract book title if content table didn't have it
-        if not title:
-            # Extract from volume_id path (e.g., ".../Book Title - Author.kepub.epub")
-            try:
-                title = Path(volume_id).stem.split(' - ')[0].replace('_', ' ')
-                attribution = Path(volume_id).stem.split(' - ')[1].replace('.kepub', '').replace('_', ' ')
-            except:
-                title = volume_id
-                attribution = "Unknown Author"
-        
-        # Parse the date
-        try:
-            date_obj = datetime.strptime(date_created, "%Y-%m-%dT%H:%M:%S.%f")
-            formatted_date = date_obj.strftime("%Y-%m-%d %H:%M:%S")
-        except:
-            formatted_date = date_created
-        
-        # Extract chapter information from container path if not in content table
-        if not chapter_title and container_path:
-            try:
-                # Look for #pgepubid... in the path which often contains chapter info
-                chapter_id = container_path.split('#')[-1]
-                if chapter_id.startswith('pgepubid'):
-                    chapter_title = f"Chapter {chapter_id.replace('pgepubid', '')}"
-            except:
-                chapter_title = None
-        
-        # Format chapter progress as percentage
-        progress_pct = f"{chapter_progress * 100:.1f}%" if chapter_progress is not None else None
-        
-        highlights.append({
-            "text": text,
-            "annotation": annotation,
-            "date": formatted_date,
-            "book_title": title,
-            "author": attribution,
-            "chapter": chapter_title,
-            "progress": progress_pct,
-            "type": highlight_type or "highlight",
-            "color": color_map.get(color, "unknown") if color is not None else None,
-            "context": context_string
-        })
     
-    conn.close()
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        
+        query = """
+        SELECT 
+            b.Text,
+            b.Annotation,
+            b.DateCreated,
+            b.VolumeID,
+            c.Title,
+            c.Attribution,
+            b.ChapterProgress,
+            b.Type,
+            b.ContextString
+        FROM Bookmark b
+        LEFT JOIN content c ON b.VolumeID = c.ContentID
+        WHERE b.Text IS NOT NULL OR b.Annotation IS NOT NULL
+        ORDER BY b.DateCreated
+        """
+        
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        for row in results:
+            (text, annotation, date_created, volume_id, title, attribution, 
+             chapter_progress, highlight_type, context_string) = row
+            
+            # Clean up the volume ID to extract book title if content table didn't have it
+            if not title:
+                try:
+                    title = Path(volume_id).stem.split(' - ')[0].replace('_', ' ')
+                    attribution = Path(volume_id).stem.split(' - ')[1].replace('.kepub', '').replace('_', ' ')
+                except (IndexError, AttributeError):
+                    title = volume_id
+                    attribution = "Unknown Author"
+            
+            # Parse the date
+            formatted_date = parse_date(date_created)
+            
+            # Format chapter progress as percentage
+            progress_pct = f"{chapter_progress * 100:.1f}%" if chapter_progress is not None else None
+            
+            highlights.append({
+                "text": text,
+                "annotation": annotation,
+                "date": formatted_date,
+                "book_title": title,
+                "author": attribution,
+                "progress": progress_pct,
+                "type": highlight_type or "highlight",
+                "context": context_string
+            })
+    
     return highlights
 
 def export_markdown(highlights: List[Dict[str, Any]]) -> str:
-    """Export highlights in Markdown format."""
+    """
+    Export highlights in Markdown format.
+    
+    Args:
+        highlights: List of highlight dictionaries from get_highlights()
+        
+    Returns:
+        String containing formatted markdown text
+    """
     output = "# Kobo Reader Highlights\n\n"
     current_book = None
     
@@ -112,20 +147,14 @@ def export_markdown(highlights: List[Dict[str, Any]]) -> str:
             output += f"\n## {h['book_title']}\n"
             output += f"*by {h['author']}*\n\n"
         
-        # Add chapter and progress info if available
-        location_info = []
-        if h["chapter"]:
-            location_info.append(h["chapter"])
+        # Add progress info if available
         if h["progress"]:
-            location_info.append(f"Progress: {h['progress']}")
-        if location_info:
-            output += f"*Location: {' - '.join(location_info)}*\n\n"
+            output += f"*Progress: {h['progress']}*\n\n"
         
-        # Add the highlight with its color
-        if h["color"] and h["color"] != "none":
-            output += f"> {h['text']} _{h['color']} highlight_\n\n"
-        else:
-            output += f"> {h['text']}\n\n"
+        # Add the highlight - ensure each line starts with >
+        quote_lines = h['text'].splitlines()
+        formatted_quote = '\n'.join(f"> {line.strip()}" if line.strip() else ">" for line in quote_lines)
+        output += f"{formatted_quote}\n\n"
         
         # Add context if available
         if h["context"]:
@@ -140,7 +169,15 @@ def export_markdown(highlights: List[Dict[str, Any]]) -> str:
     return output
 
 def export_plain(highlights: List[Dict[str, Any]]) -> str:
-    """Export highlights in plain text format."""
+    """
+    Export highlights in plain text format.
+    
+    Args:
+        highlights: List of highlight dictionaries from get_highlights()
+        
+    Returns:
+        String containing formatted plain text
+    """
     output = "KOBO READER HIGHLIGHTS\n\n"
     current_book = None
     
@@ -151,20 +188,12 @@ def export_plain(highlights: List[Dict[str, Any]]) -> str:
             output += f"by {h['author']}\n"
             output += "=" * 40 + "\n\n"
         
-        # Add chapter and progress info if available
-        location_info = []
-        if h["chapter"]:
-            location_info.append(h["chapter"])
+        # Add progress info if available
         if h["progress"]:
-            location_info.append(f"Progress: {h['progress']}")
-        if location_info:
-            output += f"Location: {' - '.join(location_info)}\n\n"
+            output += f"Progress: {h['progress']}\n\n"
         
-        # Add the highlight with its color
-        if h["color"] and h["color"] != "none":
-            output += f'"{h["text"]}" ({h["color"]} highlight)\n\n'
-        else:
-            output += f'"{h["text"]}"\n\n'
+        # Add the highlight
+        output += f'"{h["text"]}"\n\n'
         
         # Add context if available
         if h["context"]:
@@ -179,7 +208,13 @@ def export_plain(highlights: List[Dict[str, Any]]) -> str:
     
     return output
 
-def main():
+def main() -> int:
+    """
+    Main entry point for the script.
+    
+    Returns:
+        0 on success, 1 on error
+    """
     parser = argparse.ArgumentParser(description="Export highlights from Kobo Reader database")
     parser.add_argument(
         "-d", "--database",
